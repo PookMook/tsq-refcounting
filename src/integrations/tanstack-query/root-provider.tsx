@@ -27,7 +27,7 @@ function getReferenceKey(data: any): string | false {
  * @param data The object or array to traverse
  * @returns The original data (for chaining)
  */
-function processReferences(data: any, isUpdate: boolean): any {
+function processReferences(data: any): any {
   if (!data || typeof data !== "object") {
     return data; // Skip primitives, null, and undefined
   }
@@ -41,7 +41,7 @@ function processReferences(data: any, isUpdate: boolean): any {
     if (weakRefs) {
       for (let i = weakRefs.length - 1; i >= 0; i--) {
         const ref = weakRefs[i].deref();
-        console.log("found ref", isUpdate, ref);
+        console.log("found ref", ref);
         if (ref) {
           // The object still exists, update it
           Object.assign(ref, data);
@@ -70,14 +70,14 @@ function processReferences(data: any, isUpdate: boolean): any {
   // Recursively process arrays
   if (Array.isArray(data)) {
     for (const item of data) {
-      processReferences(item, isUpdate);
+      processReferences(item);
     }
   }
   // Recursively process object properties
   else {
     for (const key in data) {
       if (Object.prototype.hasOwnProperty.call(data, key)) {
-        processReferences(data[key], isUpdate);
+        processReferences(data[key]);
       }
     }
   }
@@ -112,14 +112,14 @@ let cleanupIntervalId: number | null = null;
 const queryCache = new QueryCache({
   onSuccess: (data) => {
     // Track references in successful query results
-    processReferences(data, false);
+    processReferences(data);
   },
 });
 
 const mutationCache = new MutationCache({
   onSuccess: (data) => {
     // Track references in successful mutation results
-    processReferences(data, true);
+    processReferences(data);
   },
 });
 
