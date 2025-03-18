@@ -15,6 +15,12 @@ function TanStackQueryDemo() {
   const [open, setOpen] = useState(false);
   const [open2, setOpen2] = useState(false);
 
+  const refresh = useMutation({
+    mutationFn: async () => {
+      return undefined;
+    },
+  });
+
   const test = useMutation({
     mutationFn: async () => {
       await new Promise((resolve) => setTimeout(resolve, 100));
@@ -33,6 +39,7 @@ function TanStackQueryDemo() {
     <div className="p-4 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 min-h-screen">
       <h1 className="text-2xl mb-4 font-bold">People list</h1>
       <button onClick={() => test.mutate()}>Mutate</button> |
+      <button onClick={() => refresh.mutate()}>Refresh</button> |
       <button onClick={() => setOpen(!open)}>Toggle</button> |
       <button onClick={() => setOpen2(!open2)}>Toggle2</button>
       {open && <TanStackQueryDemo2 iteration={1} />}

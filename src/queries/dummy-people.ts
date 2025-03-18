@@ -20,5 +20,5 @@ export const updatedDummyPeopleQuery = (iteration: number) => queryOptions({
         email: 'jane.doe@example.com',
       }]
     )
-  }
+  },
 })
