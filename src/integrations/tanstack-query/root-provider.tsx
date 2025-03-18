@@ -1,9 +1,16 @@
-import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import * as React from 'react'
+import {
+  MutationCache,
+  QueryCache,
+  QueryClient,
+  QueryClientProvider,
+} from "@tanstack/react-query";
+import * as React from "react";
 
 // Reference tracking data structures
 // We'll use a Map of entity IDs to arrays of WeakRefs
 const objectReferences = new Map<string, WeakRef<object>[]>();
+const keyReferences = new Map<string, WeakRef<object>>();
+const keyKeys = new Map<string, unknown[]>();
 
 /**
  * Computes a reference key for an object if it has __typename and id
@@ -11,7 +18,7 @@ const objectReferences = new Map<string, WeakRef<object>[]>();
  * @returns A string key in the format "__typename:id" or false if not a trackable entity
  */
 function getReferenceKey(data: any): string | false {
-  if (data && typeof data === 'object' && data.__typename && data.id) {
+  if (data && typeof data === "object" && data.__typename && data.id) {
     return `${data.__typename}:${data.id}`;
   }
   return false;
@@ -20,63 +27,58 @@ function getReferenceKey(data: any): string | false {
 /**
  * Traverses an object or array and either tracks or updates references to objects with __typename and id
  * @param data The object or array to traverse
- * @param isUpdate Whether to update existing references (true) or just track them (false)
  * @returns The original data (for chaining)
  */
-function processReferences(data: any, isUpdate: boolean): any {
-  if (!data || typeof data !== 'object') {
+function processReferences(data: any): any {
+  if (!data || typeof data !== "object") {
     return data; // Skip primitives, null, and undefined
   }
 
   // Check if this is a trackable entity (has __typename and id)
   const trackCode = getReferenceKey(data);
-  
+
   if (trackCode) {
-    if (isUpdate) {
-      // UPDATE MODE: Update all references that haven't been garbage collected
-      const weakRefs = objectReferences.get(trackCode);
-      
-      if (weakRefs) {
-        for (let i = weakRefs.length - 1; i >= 0; i--) {
-          const ref = weakRefs[i].deref();
-          if (ref) {
-            // The object still exists, update it
-            Object.assign(ref, data);
-          } else {
-            // The object has been garbage collected, remove this WeakRef
-            weakRefs.splice(i, 1);
-          }
-        }
-        
-        // If all references have been garbage collected, remove this entity
-        if (weakRefs.length === 0) {
-          objectReferences.delete(trackCode);
+    // Actually update the references in queries and mutations
+    const weakRefs = objectReferences.get(trackCode);
+    if (weakRefs) {
+      for (let i = 0; i < weakRefs.length; i++) {
+        const ref = weakRefs[i].deref();
+        if (ref) {
+          // The object still exists, update it
+          Object.assign(ref, data);
+        } else {
+          // The object has been garbage collected, remove this WeakRef
+          weakRefs.splice(i, 1);
         }
       }
-    } else {
-      // TRACK MODE: Add this object to the tracked references
-      if (!objectReferences.has(trackCode)) {
-        objectReferences.set(trackCode, []);
+
+      // If all references have been garbage collected, remove this entity
+      if (weakRefs.length === 0) {
+        objectReferences.delete(trackCode);
       }
-      
-      const refs = objectReferences.get(trackCode);
-      if (refs) {
-        refs.push(new WeakRef(data));
-      }
+    }
+    // in both cases, we need to add this object to the tracked references
+    if (!objectReferences.has(trackCode)) {
+      objectReferences.set(trackCode, []);
+    }
+
+    const refs = objectReferences.get(trackCode);
+    if (refs) {
+      refs.push(new WeakRef(data));
     }
   }
 
   // Recursively process arrays
   if (Array.isArray(data)) {
     for (const item of data) {
-      processReferences(item, isUpdate);
+      processReferences(item);
     }
-  } 
+  }
   // Recursively process object properties
   else {
     for (const key in data) {
       if (Object.prototype.hasOwnProperty.call(data, key)) {
-        processReferences(data[key], isUpdate);
+        processReferences(data[key]);
       }
     }
   }
@@ -84,14 +86,20 @@ function processReferences(data: any, isUpdate: boolean): any {
   return data;
 }
 
+// Set up periodic cleanup
+const CLEANUP_INTERVAL = 5 * 60 * 1000; // 5 minutes
+let cleanupIntervalId: number | null = null;
+
 /**
  * Periodically checks for and removes empty reference arrays from the objectReferences map
  */
 function cleanupReferences(): void {
   for (const [key, weakRefs] of objectReferences.entries()) {
     // Filter out any WeakRefs whose objects have been garbage collected
-    const validRefs = weakRefs.filter(weakRef => weakRef.deref() !== undefined);
-    
+    const validRefs = weakRefs.filter(
+      (weakRef) => weakRef.deref() !== undefined
+    );
+
     if (validRefs.length === 0) {
       // All objects have been garbage collected, remove this entity
       objectReferences.delete(key);
@@ -102,55 +110,100 @@ function cleanupReferences(): void {
   }
 }
 
-// Set up periodic cleanup
-const CLEANUP_INTERVAL = 5 * 60 * 1000; // 5 minutes
-let cleanupIntervalId: number | null = null;
-
 /**
- * Gets all references to a specific entity
- * @param entity An entity identifier string
- * @returns Array of objects or undefined if not tracked
+ * Creates a deep immutable copy of an array or object
+ * @param data The object or array to create a deep copy of
+ * @returns A new deep copy of the input data
  */
-export function getReferences(entity: string): object[] | undefined {
-  const weakRefs = objectReferences.get(entity);
-  if (!weakRefs) return undefined;
-  
-  // Return only the objects that haven't been garbage collected
-  return weakRefs
-    .map(weakRef => weakRef.deref())
-    .filter((obj): obj is object => obj !== undefined);
+function createDeepImmutable<T>(data: T): T {
+  // Handle null, undefined, or primitive values
+  if (data === null || data === undefined || typeof data !== "object") {
+    return data;
+  }
+
+  // Handle arrays
+  if (Array.isArray(data)) {
+    return data.map((item) => createDeepImmutable(item)) as unknown as T;
+  }
+
+  // Handle objects
+  const result: Record<string, any> = {};
+  for (const key in data) {
+    if (Object.prototype.hasOwnProperty.call(data, key)) {
+      result[key] = createDeepImmutable((data as Record<string, any>)[key]);
+    }
+  }
+
+  return result as T;
 }
 
-const queryCache = new QueryCache({
-  onSuccess: (data) => {
-    // Track references in successful query results
-    processReferences(data, false);
-  },
-})
+const queryCache = new QueryCache({});
+
+queryCache.subscribe((query) => {
+  // We would need to also update things when a new query comes in, unclear how this would work yet without creating loops
+
+  if (
+    [
+      "added",
+      "removed",
+      "updated",
+      "observerAdded",
+      "observerRemoved",
+      "observerResultsUpdated",
+      "observerOptionsUpdated",
+    ].includes(query.type) &&
+    query.query.state.status === "success"
+  ) {
+    processReferences(query.query.state.data);
+    keyReferences.set(query.query.queryHash, new WeakRef(query.query.state));
+    keyKeys.set(query.query.queryHash, query.query.queryKey);
+  }
+});
 
 const mutationCache = new MutationCache({
   onSuccess: (data) => {
     // Track references in successful mutation results
-    processReferences(data, true);
+    processReferences(data);
   },
-})
+});
 
-const queryClient = new QueryClient({
+mutationCache.subscribe((mutation) => {
+  if (mutation.type === "updated" && mutation.action.type === "success") {
+    for (const [key, data] of keyReferences.entries()) {
+      const actualData = data.deref();
+      if (!actualData) {
+        keyReferences.delete(key);
+        keyKeys.delete(key);
+      }
+      if (actualData && "data" in actualData) {
+        const actualKey = keyKeys.get(key);
+        if (actualKey) {
+          // Use the new createDeepImmutable function instead of the simple spread
+          const immutableData = createDeepImmutable(actualData.data);
+          console.log("updating key", actualKey, actualData);
+          queryClient.setQueryData(actualKey, immutableData);
+        }
+      }
+    }
+  }
+});
+
+export const queryClient = new QueryClient({
   queryCache,
   mutationCache,
-})
+});
 
 export function getContext() {
   return {
     queryClient,
-  }
+  };
 }
 
 export function Provider({ children }: { children: React.ReactNode }) {
   // Start cleanup when Provider mounts
   React.useEffect(() => {
     cleanupIntervalId = setInterval(cleanupReferences, CLEANUP_INTERVAL);
-    
+
     // Clean up interval when Provider unmounts
     return () => {
       if (cleanupIntervalId) {
@@ -162,5 +215,5 @@ export function Provider({ children }: { children: React.ReactNode }) {
 
   return (
     <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-  )
+  );
 }
