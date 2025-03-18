@@ -86,6 +86,10 @@ function processReferences(data: any): any {
   return data;
 }
 
+// Set up periodic cleanup
+const CLEANUP_INTERVAL = 5 * 60 * 1000; // 5 minutes
+let cleanupIntervalId: number | null = null;
+
 /**
  * Periodically checks for and removes empty reference arrays from the objectReferences map
  */
@@ -105,42 +109,6 @@ function cleanupReferences(): void {
     }
   }
 }
-
-// Set up periodic cleanup
-const CLEANUP_INTERVAL = 5 * 60 * 1000; // 5 minutes
-let cleanupIntervalId: number | null = null;
-
-const queryCache = new QueryCache({
-  onSuccess: (data) => {
-    // Track references in successful query results
-    processReferences(data);
-  },
-});
-
-queryCache.subscribe((query) => {
-  if (
-    [
-      "added",
-      "removed",
-      "updated",
-      "observerAdded",
-      "observerRemoved",
-      "observerResultsUpdated",
-      "observerOptionsUpdated",
-    ].includes(query.type)
-  ) {
-    processReferences(query.query.state.data);
-    keyReferences.set(query.query.queryHash, new WeakRef(query.query.state));
-    keyKeys.set(query.query.queryHash, query.query.queryKey);
-  }
-});
-
-const mutationCache = new MutationCache({
-  onSuccess: (data) => {
-    // Track references in successful mutation results
-    processReferences(data);
-  },
-});
 
 /**
  * Creates a deep immutable copy of an array or object
@@ -168,6 +136,36 @@ function createDeepImmutable<T>(data: T): T {
 
   return result as T;
 }
+
+const queryCache = new QueryCache({});
+
+queryCache.subscribe((query) => {
+  // We would need to also update things when a new query comes in, unclear how this would work yet without creating loops
+
+  if (
+    [
+      "added",
+      "removed",
+      "updated",
+      "observerAdded",
+      "observerRemoved",
+      "observerResultsUpdated",
+      "observerOptionsUpdated",
+    ].includes(query.type) &&
+    query.query.state.status === "success"
+  ) {
+    processReferences(query.query.state.data);
+    keyReferences.set(query.query.queryHash, new WeakRef(query.query.state));
+    keyKeys.set(query.query.queryHash, query.query.queryKey);
+  }
+});
+
+const mutationCache = new MutationCache({
+  onSuccess: (data) => {
+    // Track references in successful mutation results
+    processReferences(data);
+  },
+});
 
 mutationCache.subscribe((mutation) => {
   if (mutation.type === "updated" && mutation.action.type === "success") {
