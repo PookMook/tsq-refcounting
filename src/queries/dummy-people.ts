@@ -8,14 +8,14 @@ export const updatedDummyPeopleQuery = (iteration: number) => queryOptions({
       [{
         id: 1,
         __typename: 'Person',
-        name: 'UpdatedJohn Doe',
+        name: 'John Doe ' + iteration,
         age: 30,
         email: 'john.doe@example.com',
       },
       {
         id: 2,
         __typename: 'Person',
-        name: 'Updated Jane Doe',
+        name: 'Mary Doe ' + iteration,
         age: 25,
         email: 'jane.doe@example.com',
       }]
