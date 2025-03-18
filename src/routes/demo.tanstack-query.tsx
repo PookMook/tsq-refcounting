@@ -3,7 +3,6 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { updatedDummyPeopleQuery } from "../queries/dummy-people";
 import { useState } from "react";
 import { person1Mutation } from "../mutations/person1";
-import { queryClient } from "../integrations/tanstack-query/root-provider";
 
 export const Route = createFileRoute("/demo/tanstack-query")({
   component: TanStackQueryDemo,
