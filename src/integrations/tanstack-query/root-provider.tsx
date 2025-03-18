@@ -9,6 +9,8 @@ import * as React from "react";
 // Reference tracking data structures
 // We'll use a Map of entity IDs to arrays of WeakRefs
 const objectReferences = new Map<string, WeakRef<object>[]>();
+const keyReferences = new Map<string, WeakRef<object>>();
+const keyKeys = new Map<string, unknown[]>();
 
 /**
  * Computes a reference key for an object if it has __typename and id
@@ -39,9 +41,8 @@ function processReferences(data: any): any {
     // Actually update the references in queries and mutations
     const weakRefs = objectReferences.get(trackCode);
     if (weakRefs) {
-      for (let i = weakRefs.length - 1; i >= 0; i--) {
+      for (let i = 0; i < weakRefs.length; i++) {
         const ref = weakRefs[i].deref();
-        console.log("found ref", ref);
         if (ref) {
           // The object still exists, update it
           Object.assign(ref, data);
@@ -116,6 +117,24 @@ const queryCache = new QueryCache({
   },
 });
 
+queryCache.subscribe((query) => {
+  if (
+    [
+      "added",
+      "removed",
+      "updated",
+      "observerAdded",
+      "observerRemoved",
+      "observerResultsUpdated",
+      "observerOptionsUpdated",
+    ].includes(query.type)
+  ) {
+    processReferences(query.query.state.data);
+    keyReferences.set(query.query.queryHash, new WeakRef(query.query.state));
+    keyKeys.set(query.query.queryHash, query.query.queryKey);
+  }
+});
+
 const mutationCache = new MutationCache({
   onSuccess: (data) => {
     // Track references in successful mutation results
@@ -123,7 +142,55 @@ const mutationCache = new MutationCache({
   },
 });
 
-const queryClient = new QueryClient({
+/**
+ * Creates a deep immutable copy of an array or object
+ * @param data The object or array to create a deep copy of
+ * @returns A new deep copy of the input data
+ */
+function createDeepImmutable<T>(data: T): T {
+  // Handle null, undefined, or primitive values
+  if (data === null || data === undefined || typeof data !== "object") {
+    return data;
+  }
+
+  // Handle arrays
+  if (Array.isArray(data)) {
+    return data.map((item) => createDeepImmutable(item)) as unknown as T;
+  }
+
+  // Handle objects
+  const result: Record<string, any> = {};
+  for (const key in data) {
+    if (Object.prototype.hasOwnProperty.call(data, key)) {
+      result[key] = createDeepImmutable((data as Record<string, any>)[key]);
+    }
+  }
+
+  return result as T;
+}
+
+mutationCache.subscribe((mutation) => {
+  if (mutation.type === "updated" && mutation.action.type === "success") {
+    for (const [key, data] of keyReferences.entries()) {
+      const actualData = data.deref();
+      if (!actualData) {
+        keyReferences.delete(key);
+        keyKeys.delete(key);
+      }
+      if (actualData && "data" in actualData) {
+        const actualKey = keyKeys.get(key);
+        if (actualKey) {
+          // Use the new createDeepImmutable function instead of the simple spread
+          const immutableData = createDeepImmutable(actualData.data);
+          console.log("updating key", actualKey, actualData);
+          queryClient.setQueryData(actualKey, immutableData);
+        }
+      }
+    }
+  }
+});
+
+export const queryClient = new QueryClient({
   queryCache,
   mutationCache,
 });
